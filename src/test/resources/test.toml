@@ -1,0 +1,66 @@
+mongo-url="mongodb://localhost"
+mongo-db="jobs"
+mongo-collection="ads"
+solr-collection="jobs"
+solr-unique-key="jobid"
+solr-url="http://localhost:8080/solr"
+solr-writer-batch=2
+#mongo-start-epoch=1602601575 #resume after this epoch, ignore any resumetokens
+#mongo-batchsize=1000
+mongo-pipeline='''
+[
+  {$match: {'jobid': {$exists:true}}}
+]
+'''
+#sync-collection="monsolr"
+#solr-num-writers="1"
+#solr-writer-batch="1"
+#app-queue-size="100" #default to writers*writer-batch
+app-tracker-delay-secs=1 # [changestream only] default to 0 (no tracking), number of secs to track
+app-progress-delay-secs=1 # default to 0 (to progress reporting), number of secs for reporting
+
+#[[changestream.update]]  #one of create/replace/update/delete
+#name="update"
+##create:  add document,  ONLY if solr doc does not already exist
+##replace: add document, replace if solr doc already exist
+##update:  atomic update docuemnt ONLY if it already exists (optimistic concurrency)
+##delete:  remove document
+#mongo-pipeline='''
+#[
+# {'$match':  {'$and' : [
+#    {'fullDocument.jobid' : {'$exists':true}},
+#    {'operationType': 'update'},
+#    {'updateDescription.updatedFields.jobid' : {'$exists':false}}
+# ]}},
+# {'$project': {
+#  'fullDocument.jobid':1,
+#  'fullDocument.title':1,
+#  'updateDescription':1
+#  'clusterTime':1,
+# }},
+# {'$addFields': {'fullDocument.newField': 'this is an added field!'}}
+#]
+#'''
+
+#{'$project': {
+#  'fullDocument.jobid':1,
+#  'fullDocument.title':1
+# }},
+# {'$addFields': {'fullDocument.newField': 'this is an added field!'}}
+# ]
+
+#[[changestream.create]]
+# name="create2"
+#
+#[[changestream.replace]]
+# name="replace"
+#
+#[[changestream.update]]
+# name="update"
+#
+#[[changestream.delete]]
+# name="delete"
+
+
+
+
