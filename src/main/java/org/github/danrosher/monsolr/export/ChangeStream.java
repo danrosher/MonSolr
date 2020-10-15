@@ -121,7 +121,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                                     updateRequestMap.clear();
                                 }
                             } else {
-                                log.warn(String.format("Unable to find collection for jobid:%s",
+                                log.warn(String.format("Unable to find collection for uniqueKey:%s",
                                     p.sdoc.getFieldValue(solr_unique_key)));
                             }
                         }
