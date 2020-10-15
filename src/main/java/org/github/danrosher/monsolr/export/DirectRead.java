@@ -8,6 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.extern.log4j.Log4j;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.request.UpdateRequest;
+import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrInputDocument;
 import org.bson.Document;
 import org.github.danrosher.monsolr.exec.NamedPrefixThreadFactory;
@@ -30,6 +31,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 
 @Log4j
 public class DirectRead extends Exporter implements Callable<Void> {
@@ -90,15 +92,13 @@ public class DirectRead extends Exporter implements Callable<Void> {
             });
             List<Future<?>> tasks = new ArrayList<>(num_writers);
             String solr_collection = Objects.requireNonNull(config.getString("solr-collection"));
-            boolean solr_collection_from_field = false;
-            if (solr_collection.startsWith("$")) {
-                solr_collection_from_field = true;
-                solr_collection = solr_collection.substring(1);
+            Function<SolrInputDocument, String> solr_collection_function = (x -> solr_collection);
+            if(solr_collection.startsWith("$")){
+                final String solr_collection_field = solr_collection.substring(1);
+                solr_collection_function =  (sdoc -> (String) sdoc.getFieldValue(solr_collection_field));
             }
-
             for (int i = 0; i < num_writers; i++) {
-                final boolean finalSolr_collection_from_field = solr_collection_from_field;
-                final String finalSolr_collection = solr_collection;
+                Function<SolrInputDocument, String> finalSolr_collection_function = solr_collection_function;
                 tasks.add(exec.submit(() -> {
                     try {
                         Map<String, UpdateRequest> updateRequestMap = new HashMap<>();
@@ -109,10 +109,9 @@ public class DirectRead extends Exporter implements Callable<Void> {
                                 break;
                             SolrInputDocument solrDoc = new SolrInputDocument();
                             for (Map.Entry<String, Object> e : d.entrySet()) solrDoc.setField(e.getKey(), e.getValue());
-                            String coll = finalSolr_collection_from_field ? (String) solrDoc.getFieldValue(finalSolr_collection) : finalSolr_collection;
+                            String coll = finalSolr_collection_function.apply(solrDoc);
                             if (coll != null && !"".equals(coll)) {
-                                updateRequestMap.computeIfAbsent(coll, k -> new UpdateRequest())
-                                    .add(solrDoc);
+                                updateRequestMap.computeIfAbsent(coll, k -> new UpdateRequest()).add(solrDoc);
                                 c++;
                                 if (c >= writer_batch) {
                                     for (Map.Entry<String, UpdateRequest> entry : updateRequestMap.entrySet())
