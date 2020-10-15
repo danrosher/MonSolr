@@ -26,7 +26,9 @@ import org.tomlj.TomlTable;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
@@ -41,6 +43,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import static com.mongodb.client.model.Filters.eq;
@@ -88,21 +92,37 @@ public class ChangeStream extends Exporter implements Callable<Void> {
             List<Future<?>> tasks = new ArrayList<>();
             MongoDatabase database = client
                 .getDatabase(Objects.requireNonNull(config.getString("mongo-db")));
-            String collection = Objects.requireNonNull(config.getString("mongo-collection"));
-            addProducers(tasks, database, collection);
+            String mongo_collection = Objects.requireNonNull(config.getString("mongo-collection"));
+            String solr_collection = Objects.requireNonNull(config.getString("solr-collection"));
+            addProducers(tasks, database, mongo_collection, solr_collection);
             int num_writers = getInt("solr-num-writers", 1);
             int writer_batch = getInt("solr-writer-batch", 1000);
-            String solr_collection = Objects.requireNonNull(config.getString("solr-collection"));
+            final String scoll = solr_collection.startsWith("$") ? solr_collection.substring(1) : solr_collection;
+            final Function<SolrInputDocument, String> solr_collection_function = solr_collection.startsWith("$")
+                ? (sdoc -> (String) sdoc.getFieldValue(scoll))
+                : (x -> scoll);
             for (int i = 0; i < num_writers; i++) {
                 tasks.add(exec.submit(() -> {
                     try {
-                        UpdateRequest updateRequest = new UpdateRequest();
+                        Map<String, UpdateRequest> updateRequestMap = new HashMap<>();
+                        int c = 0;
+                        String solr_unique_key = config.getString("solr-unique-key");
                         while (broker.isRunning()) {
                             SolrDocProcessor p = broker.take();
-                            p.updateRequestFunction.apply(updateRequest, p.sdoc);
-                            if (updateRequestSize(updateRequest) >= writer_batch) {
-                                solrWriters.request(updateRequest, solr_collection);
-                                updateRequest.clear();
+                            String coll = solr_collection_function.apply(p.sdoc);
+                            if (coll != null && !"".equals(coll)) {
+                                p.updateRequestFunction.apply(
+                                    updateRequestMap.computeIfAbsent(coll, k -> new UpdateRequest()), p.sdoc);
+                                c++;
+                                if (c >= writer_batch) {
+                                    for (Map.Entry<String, UpdateRequest> entry : updateRequestMap.entrySet())
+                                        solrWriters.request(entry.getValue(), entry.getKey());
+                                    c = 0;
+                                    updateRequestMap.clear();
+                                }
+                            } else {
+                                log.warn(String.format("Unable to find collection for jobid:%s",
+                                    p.sdoc.getFieldValue(solr_unique_key)));
                             }
                         }
                     } catch (InterruptedException ignore) {
@@ -170,8 +190,12 @@ public class ChangeStream extends Exporter implements Callable<Void> {
         collection.updateOne(eq("_id", name), set("delay", metric.cusorDelay.longValue()), new UpdateOptions().upsert(true));
     }
 
-    private void addProducers(List<Future<?>> tasks, MongoDatabase database, String collection) {
+    private void addProducers(List<Future<?>> tasks, MongoDatabase database, String mongo_collection, final String solr_collection) {
         String id = config.getString("solr-unique-key");
+        final String scoll = solr_collection.startsWith("$") ? solr_collection.substring(1) : solr_collection;
+        final BiConsumer<SolrInputDocument, Document> solr_collection_function = solr_collection.startsWith("$")
+            ? ((sdoc, doc) -> sdoc.setField(scoll, doc.getString(scoll)))
+            : ((a, b) -> {}); //do nothing
         ImmutableMap.of(
             "create",
             ImmutableMap.of(
@@ -180,6 +204,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                         SolrInputDocument sdoc = new SolrInputDocument("_version_", "0");//overwrite
                         Objects.requireNonNull(d.getFullDocument())
                             .forEach(sdoc::setField);
+                        solr_collection_function.accept(sdoc, d.getFullDocument());
                         return sdoc;
                     },
                 "updateRequestFunction", (CheckedFunction<UpdateRequest, SolrInputDocument>)
@@ -192,6 +217,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                         SolrInputDocument sdoc = new SolrInputDocument("_version_", "0");//overwtrite
                         Objects.requireNonNull(d.getFullDocument())
                             .forEach(sdoc::setField);
+                        solr_collection_function.accept(sdoc, d.getFullDocument());
                         return sdoc;
                     },
                 "updateRequestFunction", (CheckedFunction<UpdateRequest, SolrInputDocument>)
@@ -215,6 +241,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                             d.getUpdateDescription()
                                 .getRemovedFields()
                                 .forEach((k) -> sdoc.setField(k, ImmutableMap.of("set", "null")));
+                        solr_collection_function.accept(sdoc, d.getFullDocument());
                         return sdoc;
                     },
                 "updateRequestFunction", (CheckedFunction<UpdateRequest, SolrInputDocument>)
@@ -223,8 +250,12 @@ public class ChangeStream extends Exporter implements Callable<Void> {
             "delete",
             ImmutableMap.of(
                 "solrdocBuilder", (Function<ChangeStreamDocument<Document>, SolrInputDocument>)
-                    d -> new SolrInputDocument(id, Objects.requireNonNull(d.getFullDocument())
-                        .getString(id)),
+                    d -> {
+                        SolrInputDocument sdoc = new SolrInputDocument(id, Objects.requireNonNull(d.getFullDocument())
+                            .getString(id));
+                        solr_collection_function.accept(sdoc, d.getFullDocument());
+                        return sdoc;
+                    },
                 "updateRequestFunction", (CheckedFunction<UpdateRequest, SolrInputDocument>)
                     (u, s) -> u.deleteById(String.valueOf(s.get(id))))
         )
@@ -236,7 +267,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                     Function<ChangeStreamDocument<Document>, SolrInputDocument> solrdocBuilder = (Function<ChangeStreamDocument<Document>, SolrInputDocument>) map.get("solrdocBuilder");
                     CheckedFunction<UpdateRequest, SolrInputDocument> updateRequestFunction = (CheckedFunction<UpdateRequest, SolrInputDocument>) map.get("updateRequestFunction");
                     String name = t.getString("name");
-                    ChangeStreamIterable<Document> stream = getStream(database, collection, t.getString("mongo-pipeline"));
+                    ChangeStreamIterable<Document> stream = getStream(database, mongo_collection, t.getString("mongo-pipeline"));
                     int batchSize = getInt("mongo-batchsize", 0);
                     if (batchSize > 0) {
                         stream.batchSize(batchSize);

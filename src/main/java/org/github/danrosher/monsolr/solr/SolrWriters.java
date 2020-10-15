@@ -34,7 +34,8 @@ public class SolrWriters {
     public void request(UpdateRequest updateRequest, String collection) throws IOException, SolrServerException, InterruptedException {
         SolrWriter writer = $writers.take();
         try {
-            log.info("request docs:"+updateRequest.getDocumentsMap());
+            log.info("request docs:");
+            //log.info("request docs:"+updateRequest.getDocumentsMap());
             //writer.request(updateRequest, collection);
         } finally {
             $writers.put(writer);

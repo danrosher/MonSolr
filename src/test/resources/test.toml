@@ -4,22 +4,22 @@ mongo-collection="ads"
 solr-collection="$solr_collection"
 solr-unique-key="jobid"
 solr-url="http://localhost:8081/solr"
-solr-writer-batch=200
+solr-writer-batch=10
 #mongo-start-epoch=1602601575 #resume after this epoch, ignore any resumetokens
 #mongo-batchsize=1000
-mongo-pipeline='''
-[
-  {$match: {'jobid': {$exists:true}}},
-  {'$addFields': {
-    'solr_collection': {
-        $arrayElemAt: [
-            ['AD','XX','FR','AE',''],
-        {$indexOfArray: [
-            ['ad','xx','fr','ae'],
-        { $substr: [ "$jobid", 0, 2 ]} ]} ]},
-  }}
-]
-'''
+#mongo-pipeline='''
+#[
+#  {$match: {'jobid': {$exists:true}}},
+#  {'$addFields': {
+#    'solr_collection': {
+#        $arrayElemAt: [
+#            ['AD','XX','FR','AE',''],
+#        {$indexOfArray: [
+#            ['ad','xx','fr','ae'],
+#        { $substr: [ "$jobid", 0, 2 ]} ]} ]},
+#  }}
+#]
+#'''
 #sync-collection="monsolr"
 #solr-num-writers="1"
 #solr-writer-batch="1"
@@ -27,28 +27,31 @@ mongo-pipeline='''
 app-tracker-delay-secs=1 # [changestream only] default to 0 (no tracking), number of secs to track
 app-progress-delay-secs=1 # default to 0 (to progress reporting), number of secs for reporting
 
-#[[changestream.update]]  #one of create/replace/update/delete
-#name="update"
+[[changestream.update]]  #one of create/replace/update/delete
+name="update"
 ##create:  add document,  ONLY if solr doc does not already exist
 ##replace: add document, replace if solr doc already exist
 ##update:  atomic update docuemnt ONLY if it already exists (optimistic concurrency)
 ##delete:  remove document
-#mongo-pipeline='''
-#[
-# {'$match':  {'$and' : [
-#    {'fullDocument.jobid' : {'$exists':true}},
-#    {'operationType': 'update'},
-#    {'updateDescription.updatedFields.jobid' : {'$exists':false}}
-# ]}},
-# {'$project': {
-#  'fullDocument.jobid':1,
-#  'fullDocument.title':1,
-#  'updateDescription':1
-#  'clusterTime':1,
-# }},
-# {'$addFields': {'fullDocument.newField': 'this is an added field!'}}
-#]
-#'''
+mongo-pipeline='''
+[
+ {'$match':  {'$and' : [
+    {'fullDocument.jobid' : {'$exists':true}},
+    {'operationType': 'update'},
+    {'updateDescription.updatedFields.jobid' : {'$exists':false}}
+ ]}},
+ {'$project': {
+  'fullDocument.jobid':1,
+  'fullDocument.title':1,
+  'updateDescription':1,
+  'clusterTime':1,
+ }},
+ {'$addFields': {
+ 'updateDescription.updatedFields.newField': 'this is an added field!',
+ 'fullDocument.solr_collection':'new_jobs'
+ }}
+]
+'''
 
 #{'$project': {
 #  'fullDocument.jobid':1,
