@@ -16,6 +16,7 @@ import org.tomlj.TomlParseResult;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -88,23 +89,38 @@ public class DirectRead extends Exporter implements Callable<Void> {
                 }
             });
             List<Future<?>> tasks = new ArrayList<>(num_writers);
-            String solr_collection = config.getString("solr-collection");
+            String solr_collection = Objects.requireNonNull(config.getString("solr-collection"));
+            boolean solr_collection_from_field = false;
+            if (solr_collection.startsWith("$")) {
+                solr_collection_from_field = true;
+                solr_collection = solr_collection.substring(1);
+            }
+
             for (int i = 0; i < num_writers; i++) {
+                final boolean finalSolr_collection_from_field = solr_collection_from_field;
+                final String finalSolr_collection = solr_collection;
                 tasks.add(exec.submit(() -> {
                     try {
-                        List<SolrInputDocument> docs = new ArrayList<>();
+                        Map<String, UpdateRequest> updateRequestMap = new HashMap<>();
+                        int c = 0;
                         while (true) {
                             Document d = queue.take();
                             if (d == POISON)
                                 break;
                             SolrInputDocument solrDoc = new SolrInputDocument();
                             for (Map.Entry<String, Object> e : d.entrySet()) solrDoc.setField(e.getKey(), e.getValue());
-                            docs.add(solrDoc);
-                            if (docs.size() >= writer_batch) {
-                                solrWriters.request(new UpdateRequest().add(docs), solr_collection);
-                                docs.clear();
+                            String coll = finalSolr_collection_from_field ? (String) solrDoc.getFieldValue(finalSolr_collection) : finalSolr_collection;
+                            if (coll != null && !"".equals(coll)) {
+                                updateRequestMap.computeIfAbsent(coll, k -> new UpdateRequest())
+                                    .add(solrDoc);
+                                c++;
+                                if (c >= writer_batch) {
+                                    for (Map.Entry<String, UpdateRequest> entry : updateRequestMap.entrySet())
+                                        solrWriters.request(entry.getValue(), entry.getKey());
+                                    c = 0;
+                                    updateRequestMap.clear();
+                                }
                             }
-
                         }
                     } catch (IOException | SolrServerException e) {
                         log.error(e);

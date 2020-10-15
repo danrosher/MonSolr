@@ -1,15 +1,23 @@
 mongo-url="mongodb://localhost"
 mongo-db="jobs"
 mongo-collection="ads"
-solr-collection="jobs"
+solr-collection="$solr_collection"
 solr-unique-key="jobid"
-solr-url="http://localhost:8080/solr"
-solr-writer-batch=2
+solr-url="http://localhost:8081/solr"
+solr-writer-batch=200
 #mongo-start-epoch=1602601575 #resume after this epoch, ignore any resumetokens
 #mongo-batchsize=1000
 mongo-pipeline='''
 [
-  {$match: {'jobid': {$exists:true}}}
+  {$match: {'jobid': {$exists:true}}},
+  {'$addFields': {
+    'solr_collection': {
+        $arrayElemAt: [
+            ['AD','XX','FR','AE',''],
+        {$indexOfArray: [
+            ['ad','xx','fr','ae'],
+        { $substr: [ "$jobid", 0, 2 ]} ]} ]},
+  }}
 ]
 '''
 #sync-collection="monsolr"

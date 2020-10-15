@@ -1,6 +1,7 @@
 package org.github.danrosher.monsolr.exec;
 
-import com.sun.istack.internal.NotNull;
+
+import org.antlr.v4.runtime.misc.NotNull;
 
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
