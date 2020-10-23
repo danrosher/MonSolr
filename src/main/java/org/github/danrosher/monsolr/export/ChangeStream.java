@@ -41,10 +41,10 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
-import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import static com.mongodb.client.model.Filters.eq;
@@ -107,6 +107,12 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                         Map<String, UpdateRequest> updateRequestMap = new HashMap<>();
                         int c = 0;
                         String solr_unique_key = config.getString("solr-unique-key");
+                        AtomicBoolean export = new AtomicBoolean(false);
+                        final int writer_delay = getInt("solr-writer-delay", -1);
+                        if(writer_delay > 0) {
+                            Executors.newSingleThreadScheduledExecutor()
+                                .scheduleAtFixedRate(() -> export.set(true), writer_delay, writer_delay, TimeUnit.SECONDS);
+                        }
                         while (broker.isRunning()) {
                             SolrDocProcessor p = broker.take();
                             String coll = solr_collection_function.apply(p.sdoc);
@@ -115,10 +121,14 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                                     updateRequestMap.computeIfAbsent(coll, k -> new UpdateRequest()), p.sdoc);
                                 c++;
                                 if (c >= writer_batch) {
+                                    export.set(true);
+                                }
+                                if(export.get()) {
                                     for (Map.Entry<String, UpdateRequest> entry : updateRequestMap.entrySet())
                                         solrWriters.request(entry.getValue(), entry.getKey());
                                     c = 0;
                                     updateRequestMap.clear();
+                                    export.set(false);
                                 }
                             } else {
                                 log.warn(String.format("Unable to find collection for uniqueKey:%s",
