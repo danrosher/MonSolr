@@ -1,43 +1,13 @@
 # MonSolr
 
-Sync Mongo -> Solr
+MonSolr is a java application to synchronize data from Mongo to Solr. MonSolr can seed the initial import and/or sync data with changestreams.
 
 ## Description
 
 Use Aggregates and Changestreams to sync MonoDB data to Solr
 
-## Getting Started
-
-### Dependencies
-
-### Installing
-
-### Executing program
-
-* How to run the program
-* Step-by-step bullets
-```
-code blocks for commands
-```
-
-## Help
-
-Any advise for common problems or issues.
-```
-command to run if program contains helper info
-```
-
-## Authors
-
-
-## Version History
-
-
-## License
-
-This project is licensed under the [NAME HERE] License - see the LICENSE.md file for details
+See https://danrosher.github.io/MonSolr-site/ for more details
 
 ## Acknowledgments
 
-Inspiration, code snippets, etc.
-* [monstache](https://github.com/rwynn/monstache)
+Idea originally from [monstache](https://github.com/rwynn/monstache)
