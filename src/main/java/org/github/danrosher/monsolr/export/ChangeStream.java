@@ -120,9 +120,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                                 p.updateRequestFunction.apply(
                                     updateRequestMap.computeIfAbsent(coll, k -> new UpdateRequest()), p.sdoc);
                                 c++;
-                                if (c >= writer_batch) {
-                                    export.set(true);
-                                }
+                                if (c >= writer_batch) export.set(true);
                                 if(export.get()) {
                                     for (Map.Entry<String, UpdateRequest> entry : updateRequestMap.entrySet())
                                         solrWriters.request(entry.getValue(), entry.getKey());
