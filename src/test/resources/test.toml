@@ -1,15 +1,32 @@
 mongo-url="mongodb://localhost"
 mongo-db="jobs"
 mongo-collection="ads"
-solr-collection="$solr_collection"
+#solr-collection="$solr_collection"
+solr-collection="jobs_XX"
 solr-unique-key="jobid"
 solr-url="http://localhost:8081/solr"
-solr-writer-batch=10
-#mongo-start-epoch=1602601575 #resume after this epoch, ignore any resumetokens
-#mongo-batchsize=1000
+solr-writer-batch=1
+mongo-start-epoch=1605002054 #resume after this epoch, ignore any resumetokens
+mongo-batchsize=100
+
+#mongo-pipeline='''
+#[
+#  {$match: {'jobid': {$regex:/^xx/}}},
+#  {'$project': {
+#  'jobid':1,
+#  'title':1,
+#  _id:0
+#  }}
+#]
+#'''
 #mongo-pipeline='''
 #[
 #  {$match: {'jobid': {$exists:true}}},
+#  {'$project': {
+#  'jobid':1,
+#  'title':1,
+#  _id:0
+#  }},
 #  {'$addFields': {
 #    'solr_collection': {
 #        $arrayElemAt: [
@@ -27,8 +44,8 @@ solr-writer-batch=10
 app-tracker-delay-secs=1 # [changestream only] default to 0 (no tracking), number of secs to track
 app-progress-delay-secs=1 # default to 0 (to progress reporting), number of secs for reporting
 
-[[changestream.update]]  #one of create/replace/update/delete
-name="update"
+[[changestream.replace]]  #one of create/replace/update/delete
+name="replace"
 ##create:  add document,  ONLY if solr doc does not already exist
 ##replace: add document, replace if solr doc already exist
 ##update:  atomic update docuemnt ONLY if it already exists (optimistic concurrency)
@@ -36,29 +53,56 @@ name="update"
 mongo-pipeline='''
 [
  {'$match':  {'$and' : [
-    {'fullDocument.jobid' : {'$exists':true}},
+    {'fullDocument.jobid' : "jp8669b5d9b7626add63e5b1312980dbaa"},
     {'operationType': 'update'},
-    {'updateDescription.updatedFields.jobid' : {'$exists':false}}
+    {'updateDescription.updatedFields.jobid' : {'$exists':false}},
+    {'updateDescription.updatedFields.last_update_datetime': {'$exists': true}}
  ]}},
  {'$project': {
   'fullDocument.jobid':1,
   'fullDocument.title':1,
-  'updateDescription':1,
-  'clusterTime':1,
+  'fullDocument.last_update_datetime' : '$updateDescription.updatedFields.last_update_datetime',
+  'clusterTime':1
  }},
- {'$addFields': {
- 'updateDescription.updatedFields.newField': 'this is an added field!',
- 'fullDocument.solr_collection':'new_jobs'
- }}
+  {'$addFields': {
+   'updateDescription.updatedFields.rule' : 10
+   }}
 ]
 '''
 
-#{'$project': {
+#[[changestream.create]]  #one of create/replace/update/delete
+#name="create"
+###create:  add document,  ONLY if solr doc does not already exist
+###replace: add document, replace if solr doc already exist
+###update:  atomic update docuemnt ONLY if it already exists (optimistic concurrency)
+###delete:  remove document
+#mongo-pipeline='''
+#[
+# {'$match':  {'$and' : [
+#    {'fullDocument.jobid' : "jp8669b5d9b7626add63e5b1312980dbaa"},
+#    {'operationType': 'update'},
+#    {'updateDescription.updatedFields.jobid' : {'$exists':false}},
+#    {'updateDescription.updatedFields.last_update_datetime': {'$exists': true}}
+# ]}},
+# {'$project': {
 #  'fullDocument.jobid':1,
-#  'fullDocument.title':1
-# }},
-# {'$addFields': {'fullDocument.newField': 'this is an added field!'}}
-# ]
+#  'fullDocument.title':1,
+#  'updateDescription.updatedFields.last_update_datetime' : 1,
+#  'clusterTime':1
+# }}
+#]
+#'''
+
+#mongo-pipeline='''
+#[
+#{'$match':  {'jobid' : {'$exists':true}}},
+#{'$project': {
+#  'jobid':1,
+#  'title':1,
+#  _id:0
+# }}
+#]
+#'''
 
 #[[changestream.create]]
 # name="create2"
@@ -71,7 +115,3 @@ mongo-pipeline='''
 #
 #[[changestream.delete]]
 # name="delete"
-
-
-
-

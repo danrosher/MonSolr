@@ -12,14 +12,17 @@ import com.mongodb.client.model.changestream.ChangeStreamDocument;
 import lombok.AllArgsConstructor;
 import lombok.NoArgsConstructor;
 import lombok.extern.log4j.Log4j;
+import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.common.SolrInputDocument;
 import org.bson.BsonDocument;
+import org.bson.BsonDocumentReader;
 import org.bson.BsonTimestamp;
 import org.bson.Document;
+import org.bson.codecs.DecoderContext;
+import org.bson.codecs.DocumentCodec;
 import org.github.danrosher.monsolr.exec.NamedPrefixThreadFactory;
 import org.github.danrosher.monsolr.model.Broker;
-import org.github.danrosher.monsolr.solr.SolrWriters;
 import org.tomlj.TomlParseResult;
 import org.tomlj.TomlTable;
 
@@ -59,8 +62,8 @@ public class ChangeStream extends Exporter implements Callable<Void> {
 
     private Broker<SolrDocProcessor> broker;
 
-    public ChangeStream(MongoClient client, SolrWriters writers, TomlParseResult config) {
-        super(client, config, writers);
+    public ChangeStream(MongoClient client, SolrClient solrClient, TomlParseResult config) {
+        super(client, config, solrClient);
     }
 
     @FunctionalInterface
@@ -85,7 +88,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
     public Void call() throws ExecutionException, InterruptedException {
         Runtime.getRuntime()
             .addShutdownHook(new Thread(ChangeStream.this::stop));
-        broker = new Broker<>(getInt("queue_capacity", 1));
+        broker = new Broker<>(getInt("app-queue-size", 1));
         List<ScheduledFuture<?>> scheduledFutures = setupSchedulers();
         try {
             log.info("ChangeStream start:");
@@ -109,7 +112,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                         String solr_unique_key = config.getString("solr-unique-key");
                         AtomicBoolean export = new AtomicBoolean(false);
                         final int writer_delay = getInt("solr-writer-delay", -1);
-                        if(writer_delay > 0) {
+                        if (writer_delay > 0) {
                             Executors.newSingleThreadScheduledExecutor()
                                 .scheduleAtFixedRate(() -> export.set(true), writer_delay, writer_delay, TimeUnit.SECONDS);
                         }
@@ -121,9 +124,9 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                                     updateRequestMap.computeIfAbsent(coll, k -> new UpdateRequest()), p.sdoc);
                                 c++;
                                 if (c >= writer_batch) export.set(true);
-                                if(export.get()) {
+                                if (export.get()) {
                                     for (Map.Entry<String, UpdateRequest> entry : updateRequestMap.entrySet())
-                                        solrWriters.request(entry.getValue(), entry.getKey());
+                                        solrClient.request(entry.getValue(), entry.getKey());
                                     c = 0;
                                     updateRequestMap.clear();
                                     export.set(false);
@@ -203,7 +206,8 @@ public class ChangeStream extends Exporter implements Callable<Void> {
         final String scoll = solr_collection.startsWith("$") ? solr_collection.substring(1) : solr_collection;
         final BiConsumer<SolrInputDocument, Document> solr_collection_function = solr_collection.startsWith("$")
             ? ((sdoc, doc) -> sdoc.setField(scoll, doc.getString(scoll)))
-            : ((a, b) -> {}); //do nothing
+            : ((a, b) -> {
+        }); //do nothing
         ImmutableMap.of(
             "create",
             ImmutableMap.of(
@@ -241,9 +245,10 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                             .getString(id));//doc must exist
                         if (d.getUpdateDescription() != null && d.getUpdateDescription()
                             .getUpdatedFields() != null)
-                            d.getUpdateDescription()
-                                .getUpdatedFields()
-                                .forEach((k, v) -> sdoc.setField(k, ImmutableMap.of("set", v == null ? "null" : v)));
+                            new DocumentCodec().decode(new BsonDocumentReader(d.getUpdateDescription()
+                                .getUpdatedFields()), DecoderContext.builder()
+                                .build())
+                                .forEach((key, value) -> sdoc.setField(key, ImmutableMap.of("set", value == null ? "null" : value)));
                         if (d.getUpdateDescription() != null && d.getUpdateDescription()
                             .getRemovedFields() != null)
                             d.getUpdateDescription()
@@ -265,7 +270,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                         return sdoc;
                     },
                 "updateRequestFunction", (CheckedFunction<UpdateRequest, SolrInputDocument>)
-                    (u, s) -> u.deleteById(String.valueOf(s.get(id))))
+                    (u, s) -> u.deleteById((String.valueOf(s.getFieldValue(id)))))
         )
 
             .forEach((String op, ImmutableMap map) -> {

@@ -15,7 +15,7 @@ public class Broker<T> {
 
     public Broker(int capacity) {
         this.capacity = capacity;
-        queue = new ArrayBlockingQueue<>(capacity,true);
+        queue = new ArrayBlockingQueue<>(capacity);
     }
 
     public T take() throws InterruptedException {
@@ -23,13 +23,6 @@ public class Broker<T> {
     }
 
     public void put(T t) throws InterruptedException {
-        put(t, 1, TimeUnit.MILLISECONDS);
-    }
-
-    public void put(T t, long timeout, TimeUnit unit) throws InterruptedException {
-        while(isRunning) {
-            if (queue.offer(t, timeout, unit))
-                return;
-        }
+        queue.put(t);
     }
 }

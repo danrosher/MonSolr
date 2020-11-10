@@ -8,8 +8,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.changestream.FullDocument;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j;
-import org.apache.solr.client.solrj.request.UpdateRequest;
-import org.apache.solr.common.SolrInputDocument;
+import org.apache.solr.client.solrj.SolrClient;
 import org.bson.BsonDocument;
 import org.bson.BsonValue;
 import org.bson.Document;
@@ -20,15 +19,11 @@ import org.bson.codecs.DocumentCodecProvider;
 import org.bson.codecs.ValueCodecProvider;
 import org.bson.codecs.configuration.CodecRegistries;
 import org.bson.json.JsonReader;
-import org.github.danrosher.monsolr.solr.SolrWriters;
 import org.tomlj.TomlParseResult;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -40,11 +35,9 @@ public abstract class Exporter {
 
     protected final MongoClient client;
     protected final TomlParseResult config;
-    protected final SolrWriters solrWriters;
+    protected final SolrClient solrClient;
 
-    private static final BsonArrayCodec arrayReader = new BsonArrayCodec(CodecRegistries.fromProviders(Collections.unmodifiableList(Arrays.asList(new ValueCodecProvider(),
-        new BsonValueCodecProvider(),
-        new DocumentCodecProvider()))));
+    private static final BsonArrayCodec arrayReader = new BsonArrayCodec(CodecRegistries.fromProviders(List.of(new ValueCodecProvider(), new BsonValueCodecProvider(), new DocumentCodecProvider())));
 
     List<BsonDocument> getAggregates(String json){
         JsonReader reader = new JsonReader(json);
@@ -58,9 +51,7 @@ public abstract class Exporter {
     AggregateIterable<Document> getIterable(MongoCollection<Document> collection, String json, int batchSize) {
         List<BsonDocument> aggregates = getAggregates(json);
         final AggregateIterable<Document> iterable = collection.aggregate(aggregates);
-        if (batchSize > 0) {
-            iterable.batchSize(batchSize);
-        }
+        if (batchSize > 0) iterable.batchSize(batchSize);
         return iterable;
     }
 
@@ -95,15 +86,6 @@ public abstract class Exporter {
         StringWriter errors = new StringWriter();
         ex.printStackTrace(new PrintWriter(errors));
         return errors.toString();
-    }
-
-    public int updateRequestSize(UpdateRequest u){
-        int c = 0;
-        Map<SolrInputDocument, Map<String, Object>> docs = u.getDocumentsMap();
-        if(docs != null) c += docs.size();
-        Map<String, Map<String, Object>> deletes = u.getDeleteByIdMap();
-        if(deletes != null) c += deletes.size();
-        return c;
     }
 
     public int getInt(String key, long def){
