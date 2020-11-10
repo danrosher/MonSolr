@@ -23,7 +23,7 @@ import org.bson.codecs.DecoderContext;
 import org.bson.codecs.DocumentCodec;
 import org.github.danrosher.monsolr.exec.NamedPrefixThreadFactory;
 import org.github.danrosher.monsolr.model.Broker;
-import org.tomlj.TomlParseResult;
+import org.github.danrosher.monsolr.util.AppConfig;
 import org.tomlj.TomlTable;
 
 import java.time.Clock;
@@ -62,7 +62,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
 
     private Broker<SolrDocProcessor> broker;
 
-    public ChangeStream(MongoClient client, SolrClient solrClient, TomlParseResult config) {
+    public ChangeStream(MongoClient client, SolrClient solrClient, AppConfig config) {
         super(client, config, solrClient);
     }
 
@@ -88,18 +88,18 @@ public class ChangeStream extends Exporter implements Callable<Void> {
     public Void call() throws ExecutionException, InterruptedException {
         Runtime.getRuntime()
             .addShutdownHook(new Thread(ChangeStream.this::stop));
-        broker = new Broker<>(getInt("app-queue-size", 1));
+        broker = new Broker<>(config.getAppQSize());
         List<ScheduledFuture<?>> scheduledFutures = setupSchedulers();
         try {
             log.info("ChangeStream start:");
             List<Future<?>> tasks = new ArrayList<>();
             MongoDatabase database = client
-                .getDatabase(Objects.requireNonNull(config.getString("mongo-db")));
-            String mongo_collection = Objects.requireNonNull(config.getString("mongo-collection"));
-            String solr_collection = Objects.requireNonNull(config.getString("solr-collection"));
+                .getDatabase(Objects.requireNonNull(config.getMongoDB()));
+            String mongo_collection = Objects.requireNonNull(config.getMongoCollection());
+            String solr_collection = Objects.requireNonNull(config.getSolrCollection());
             addProducers(tasks, database, mongo_collection, solr_collection);
-            int num_writers = getInt("solr-num-writers", 1);
-            int writer_batch = getInt("solr-writer-batch", 1000);
+            int num_writers = config.getNumWriters();
+            int writer_batch = config.getSolrWriterBatchSize();
             final String scoll = solr_collection.startsWith("$") ? solr_collection.substring(1) : solr_collection;
             final Function<SolrInputDocument, String> solr_collection_function = solr_collection.startsWith("$")
                 ? (sdoc -> (String) sdoc.getFieldValue(scoll))
@@ -109,9 +109,9 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                     try {
                         Map<String, UpdateRequest> updateRequestMap = new HashMap<>();
                         int c = 0;
-                        String solr_unique_key = config.getString("solr-unique-key");
+                        String solr_unique_key = config.getSolrUniqueKey();
                         AtomicBoolean export = new AtomicBoolean(false);
-                        final int writer_delay = getInt("solr-writer-delay", -1);
+                        final int writer_delay = config.getSolrWriterDelay();
                         if (writer_delay > 0) {
                             Executors.newSingleThreadScheduledExecutor()
                                 .scheduleAtFixedRate(() -> export.set(true), writer_delay, writer_delay, TimeUnit.SECONDS);
@@ -172,7 +172,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
 
     private List<ScheduledFuture<?>> setupSchedulers() {
         List<ScheduledFuture<?>> list = new ArrayList<>();
-        int progress_delay = getInt("app-progress-delay-secs", 0);
+        int progress_delay = config.getAppProgressDelay();
         if (progress_delay > 0) {
             list.add(Executors.newSingleThreadScheduledExecutor()
                 .scheduleAtFixedRate(() -> metrics.forEach((name, metric) -> log.info(
@@ -184,11 +184,11 @@ public class ChangeStream extends Exporter implements Callable<Void> {
                         metric.cusorDelay.get(),
                         metric.requests.getCount()))), progress_delay, progress_delay, TimeUnit.SECONDS));
         }
-        int tracker_delay = getInt("app-tracker-delay-secs", 0);
+        int tracker_delay = config.getAppTrackerDelay();
         if (tracker_delay > 0) {
             final MongoCollection<Document> collection = client
-                .getDatabase(Objects.requireNonNull(config.getString("mongo-db")))
-                .getCollection(getString("sync-collection", "monsolr"));
+                .getDatabase(Objects.requireNonNull(config.getMongoDB()))
+                .getCollection(config.getMongoSyncCollection());
             list.add(Executors.newSingleThreadScheduledExecutor()
                 .scheduleAtFixedRate(() -> metrics.forEach((name, metric) -> trackMetrics(collection, name, metric)),
                     progress_delay, progress_delay, TimeUnit.SECONDS));
@@ -202,7 +202,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
     }
 
     private void addProducers(List<Future<?>> tasks, MongoDatabase database, String mongo_collection, final String solr_collection) {
-        String id = config.getString("solr-unique-key");
+        String id = config.getSolrUniqueKey();
         final String scoll = solr_collection.startsWith("$") ? solr_collection.substring(1) : solr_collection;
         final BiConsumer<SolrInputDocument, Document> solr_collection_function = solr_collection.startsWith("$")
             ? ((sdoc, doc) -> sdoc.setField(scoll, doc.getString(scoll)))
@@ -274,18 +274,18 @@ public class ChangeStream extends Exporter implements Callable<Void> {
         )
 
             .forEach((String op, ImmutableMap map) -> {
-                for (final Object o : config.getArrayOrEmpty("changestream." + op)
+                for (final Object o : config.getChangeStream(op)
                     .toList()) {
                     TomlTable t = (TomlTable) o;
                     Function<ChangeStreamDocument<Document>, SolrInputDocument> solrdocBuilder = (Function<ChangeStreamDocument<Document>, SolrInputDocument>) map.get("solrdocBuilder");
                     CheckedFunction<UpdateRequest, SolrInputDocument> updateRequestFunction = (CheckedFunction<UpdateRequest, SolrInputDocument>) map.get("updateRequestFunction");
                     String name = t.getString("name");
                     ChangeStreamIterable<Document> stream = getStream(database, mongo_collection, t.getString("mongo-pipeline"));
-                    int batchSize = getInt("mongo-batchsize", 0);
+                    int batchSize = config.getMongoBatchSize();
                     if (batchSize > 0) {
                         stream.batchSize(batchSize);
                     }
-                    int epochStart = getInt("mongo-start-epoch", 0);
+                    int epochStart = config.getMongoStartEpoch();
                     if (epochStart > 0) {
                         log.info(String.format("[%s] Starting from epoch in config: %d", name, epochStart));
                         stream.startAtOperationTime(new BsonTimestamp(epochStart, 0));
@@ -305,7 +305,7 @@ public class ChangeStream extends Exporter implements Callable<Void> {
 
     private BsonDocument getResumeToken(String name, MongoDatabase database) {
         BsonDocument resumeToken = null;
-        MongoCollection<Document> collection = database.getCollection(getString("sync-collection", "monsolr"));
+        MongoCollection<Document> collection = database.getCollection(config.getMongoSyncCollection());
         Document d = collection.find(eq("_id", name))
             .first();
         if (d != null) {

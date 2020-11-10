@@ -19,12 +19,11 @@ import org.bson.codecs.DocumentCodecProvider;
 import org.bson.codecs.ValueCodecProvider;
 import org.bson.codecs.configuration.CodecRegistries;
 import org.bson.json.JsonReader;
-import org.tomlj.TomlParseResult;
+import org.github.danrosher.monsolr.util.AppConfig;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -34,7 +33,7 @@ import java.util.stream.Collectors;
 public abstract class Exporter {
 
     protected final MongoClient client;
-    protected final TomlParseResult config;
+    protected final AppConfig config;
     protected final SolrClient solrClient;
 
     private static final BsonArrayCodec arrayReader = new BsonArrayCodec(CodecRegistries.fromProviders(List.of(new ValueCodecProvider(), new BsonValueCodecProvider(), new DocumentCodecProvider())));
@@ -87,13 +86,4 @@ public abstract class Exporter {
         ex.printStackTrace(new PrintWriter(errors));
         return errors.toString();
     }
-
-    public int getInt(String key, long def){
-        return Optional.ofNullable(config.getLong(key)).orElse(def).intValue();
-    }
-
-    public String getString(String key, String def) {
-        return Optional.ofNullable(config.getString(key)).orElse(def);
-    }
-
 }

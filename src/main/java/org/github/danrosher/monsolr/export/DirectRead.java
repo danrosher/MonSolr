@@ -11,7 +11,7 @@ import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.common.SolrInputDocument;
 import org.bson.Document;
 import org.github.danrosher.monsolr.exec.NamedPrefixThreadFactory;
-import org.tomlj.TomlParseResult;
+import org.github.danrosher.monsolr.util.AppConfig;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -30,8 +30,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 
-import static org.github.danrosher.monsolr.util.Util.getOption;
-
 @Log4j
 public class DirectRead extends Exporter implements Callable<Void> {
 
@@ -42,7 +40,7 @@ public class DirectRead extends Exporter implements Callable<Void> {
     private Future<?> producerFuture;
     private final Meter requests = new Meter();
 
-    public DirectRead(MongoClient client, SolrClient solrClient, TomlParseResult config) {
+    public DirectRead(MongoClient client, SolrClient solrClient, AppConfig config) {
         super(client, config, solrClient);
     }
 
@@ -53,15 +51,15 @@ public class DirectRead extends Exporter implements Callable<Void> {
             Runtime.getRuntime()
                 .addShutdownHook(new Thread(DirectRead.this::stop));
             MongoCollection<Document> collection = client
-                .getDatabase(Objects.requireNonNull(config.getString("mongo-db")))
-                .getCollection(Objects.requireNonNull(config.getString("mongo-collection")));
+                .getDatabase(Objects.requireNonNull(config.getMongoDB()))
+                .getCollection(Objects.requireNonNull(config.getMongoCollection()));
             AggregateIterable<Document> iterable = getIterable(collection,
-                config.getString("mongo-pipeline"),
-                getOption(config, "mongo-batchsize", 0)
+                config.getMongoPipeline(),
+                config.getMongoBatchSize()
             );
-            int num_writers = getOption(config, "solr-num-writers", 1);
-            int writer_batch = getOption(config, "solr-writer-batch", 1000);
-            int queue_size = getOption(config, "app-queue-size", num_writers * writer_batch);
+            int num_writers = config.getNumWriters();
+            int writer_batch = config.getSolrWriterBatchSize();
+            int queue_size = config.getAppQSize();
             ArrayBlockingQueue<Document> queue = new ArrayBlockingQueue<>(queue_size, true);
             producerFuture = exec.submit(() -> {
                 log.debug("Producer start");
@@ -82,7 +80,7 @@ public class DirectRead extends Exporter implements Callable<Void> {
                 }
             });
             List<Future<?>> tasks = new ArrayList<>(num_writers);
-            String solr_collection = Objects.requireNonNull(config.getString("solr-collection"));
+            String solr_collection = Objects.requireNonNull(config.getSolrCollection());
             Function<SolrInputDocument, String> solr_collection_function = (x -> solr_collection);
             if (solr_collection.startsWith("$")) {
                 final String solr_collection_field = solr_collection.substring(1);
@@ -150,7 +148,7 @@ public class DirectRead extends Exporter implements Callable<Void> {
 
     private List<ScheduledFuture<?>> setupSchedulers() {
         List<ScheduledFuture<?>> list = new ArrayList<>();
-        int progress_delay = getInt("app-progress-delay-secs", 0);
+        int progress_delay = config.getAppProgressDelay();
         if (progress_delay > 0) {
             list.add(Executors.newSingleThreadScheduledExecutor()
                 .scheduleAtFixedRate(() -> log.info(
