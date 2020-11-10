@@ -10,13 +10,9 @@ import org.github.danrosher.monsolr.export.DirectRead;
 import org.github.danrosher.monsolr.solr.MonSolrConcurrentUpdateSolrClient;
 import org.github.danrosher.monsolr.util.AppConfig;
 import org.tomlj.Toml;
-import org.tomlj.TomlParseResult;
 
-import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 
@@ -26,12 +22,11 @@ public class Application {
     public static void main(String[] args) throws Throwable {
         log.info("Start");
         AppConfig config = new AppConfig(Toml.parse(Paths.get(System.getProperty("config"))));
-        //TomlParseResult config = Toml.parse(Paths.get(System.getProperty("config")));
         MongoClient mongoClient = new MongoClient(new MongoClientURI(config.getMongoURL()));
         ArrayList<Callable<Void>> tasks = new ArrayList<>();
         SolrClient solrClient = new MonSolrConcurrentUpdateSolrClient(config);
         if (config.isDirect()) tasks.add(new DirectRead(mongoClient, solrClient, config));
-        //if (config.isChangeStream()) tasks.add(new ChangeStream(mongoClient, solrClient, config));
+        if (config.isChangeStream()) tasks.add(new ChangeStream(mongoClient, solrClient, config));
         Executors.newCachedThreadPool(new NamedPrefixThreadFactory("app"))
             .invokeAll(tasks);
         log.info("Finish");
